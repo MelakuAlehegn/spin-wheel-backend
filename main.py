@@ -6,6 +6,7 @@ import time
 import hashlib
 from typing import Dict, List
 from datetime import datetime
+import os
 
 from database import get_session, create_db_and_tables
 from models import Event, Prize, Session as DBSession, Spin
@@ -242,3 +243,32 @@ def get_spins(limit: int = 50, db: Session = Depends(get_session)):
         )
         for s in spins
     ]
+
+
+@app.post("/api/admin/reset")
+def admin_reset(request: Request, db: Session = Depends(get_session)):
+    """Reset spins, sessions, and restore inventory for default event.
+    Protected via header X-Admin-Secret matching ADMIN_SECRET env.
+    """
+    admin_secret = os.getenv("ADMIN_SECRET")
+    provided = request.headers.get("X-Admin-Secret")
+    if admin_secret and provided != admin_secret:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    event = db.query(Event).filter(Event.slug == DEFAULT_EVENT_SLUG).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Delete spins and sessions
+    db.query(Spin).filter(Spin.event_id == event.id).delete()
+    db.query(DBSession).filter(DBSession.event_id == event.id).delete()
+
+    # Restore inventory to initial totals
+    prizes = db.query(Prize).filter(Prize.event_id == event.id).all()
+    for p in prizes:
+        if p.total_inventory > 0:
+            p.remaining_inventory = p.total_inventory
+            db.add(p)
+
+    db.commit()
+    return {"ok": True}
