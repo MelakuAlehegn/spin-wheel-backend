@@ -144,20 +144,20 @@ def spin(request: Request, response: Response, db: Session = Depends(get_session
     # Pick winner
     label = random.choices(available_labels, weights=weights, k=1)[0]
     idx = SLICES.index(label)
-    is_prize = label in prize_map
+    # A label is a prize only if it's a DB prize with positive total inventory
+    is_prize = label in prize_map and prize_map[label].total_inventory > 0
 
     prize_id = None
     if is_prize:
         prize = prize_map[label]
+        # Defensive: only decrement if inventory remains
         if prize.remaining_inventory > 0:
             prize.remaining_inventory -= 1
             prize_id = prize.id
             db.add(prize)
         else:
-            # Prize depleted, fallback to message
+            # Inventory depleted unexpectedly; treat as message and keep label
             is_prize = False
-            idx = 3  # Arif Try!
-            label = SLICES[idx]
 
     # Create or update session
     if not db_session:
